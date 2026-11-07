@@ -1,5 +1,6 @@
 import asyncio
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 
@@ -64,6 +65,15 @@ def predict():
         raise HTTPException(status_code=503, detail="Warming up: no prediction yet.")
     return with_disclaimer(state["latest"])
 
+@app.get("/candles")
+def candles(limit: int = 200):
+    rows = list(ingest.buffer)[-max(1, min(limit, 200)):]
+    if not rows:
+        raise HTTPException(status_code=503, detail="Warming up: no candles yet.")
+    return [
+        {**row, "time": datetime.fromtimestamp(row["time"] / 1000, tz=timezone.utc).isoformat()}
+        for row in rows
+    ]
 
 @app.websocket("/ws/predictions")
 async def ws_predictions(websocket: WebSocket):

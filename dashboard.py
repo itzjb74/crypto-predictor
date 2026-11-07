@@ -1,3 +1,5 @@
+import altair as alt
+import pandas as pd
 import requests
 import streamlit as st
 
@@ -35,3 +37,45 @@ def live_panel():
 
 
 live_panel()
+
+
+@st.fragment(run_every=60)
+def chart_panel():
+    try:
+        rows = requests.get(f"{API}/candles", timeout=5).json()
+    except Exception as e:
+        st.error(f"Can't reach the API at {API}: {e}")
+        return
+
+    if not isinstance(rows, list):
+        st.info("Waiting for candles...")
+        return
+
+    df = pd.DataFrame(rows)
+    df["time"] = pd.to_datetime(df["time"]).dt.tz_localize(None)
+    df = df.set_index("time")
+    df["20-hour average"] = df["close"].rolling(20).mean()
+
+    chart_df = df.reset_index().melt(
+        "time",
+        value_vars=["close", "20-hour average"],
+        var_name="series",
+        value_name="price",
+    )
+    chart = (
+        alt.Chart(chart_df)
+        .mark_line()
+        .encode(
+            x=alt.X("time:T", title="Time (UTC)", axis=alt.Axis(format="%b %d")),
+            y=alt.Y("price:Q", scale=alt.Scale(zero=False), title="Price (USDT)"),
+            color=alt.Color("series:N", title=None),
+        )
+        .properties(height=350)
+    )
+
+    st.subheader("Last 200 closed hourly candles")
+    st.altair_chart(chart)
+    st.caption("Times are UTC. Only closed candles are shown.")
+
+
+chart_panel()
