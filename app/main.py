@@ -1,7 +1,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 
 from app import ingest
 
@@ -10,11 +10,22 @@ DISCLAIMER = (
     "edge after fees. Not financial advice."
 )
 
-state = {"latest": None}   # newest prediction, filled in by the background task
+state = {"latest": None}            # newest prediction, filled in by the background task
+clients: set[WebSocket] = set()     # currently connected websocket clients
 
 
-def store_prediction(result: dict):
+def with_disclaimer(result: dict) -> dict:
+    return {**result, "disclaimer": DISCLAIMER}
+
+
+async def store_prediction(result: dict):
+    """Called by the live feed for every new prediction."""
     state["latest"] = result
+    for ws in list(clients):                    # copy: the set can change while we await
+        try:
+            await ws.send_json(with_disclaimer(result))
+        except Exception:
+            clients.discard(ws)                 # that client went away
 
 
 def log_task_result(task: asyncio.Task):
@@ -40,11 +51,30 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "has_prediction": state["latest"] is not None}
+    return {
+        "status": "ok",
+        "has_prediction": state["latest"] is not None,
+        "websocket_clients": len(clients),
+    }
 
 
 @app.get("/predict")
 def predict():
     if state["latest"] is None:
         raise HTTPException(status_code=503, detail="Warming up: no prediction yet.")
-    return {**state["latest"], "disclaimer": DISCLAIMER}
+    return with_disclaimer(state["latest"])
+
+
+@app.websocket("/ws/predictions")
+async def ws_predictions(websocket: WebSocket):
+    await websocket.accept()
+    clients.add(websocket)
+    try:
+        if state["latest"] is not None:         # catch the new client up immediately
+            await websocket.send_json(with_disclaimer(state["latest"]))
+        while True:
+            await websocket.receive_text()      # keeps the connection open
+    except WebSocketDisconnect:
+        pass
+    finally:
+        clients.discard(websocket)

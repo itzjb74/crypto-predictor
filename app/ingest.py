@@ -58,7 +58,7 @@ def compute_prediction() -> dict:
 async def run(on_prediction):
     """Seed the buffer, report one prediction, then one more per closed candle."""
     await asyncio.to_thread(seed_buffer)
-    on_prediction(compute_prediction())
+    await on_prediction(compute_prediction())
 
     async for ws in websockets.connect(URL):   # reconnects automatically
         try:
@@ -71,13 +71,13 @@ async def run(on_prediction):
                     "low": float(k["l"]), "close": float(k["c"]), "volume": float(k["v"]),
                 }
                 if add_closed_candle(candle):
-                    on_prediction(compute_prediction())
+                    await on_prediction(compute_prediction())
         except websockets.ConnectionClosed:
             print("Connection lost, reconnecting...")
             continue
 
 
-def print_prediction(r):
+async def print_prediction(r):
     print(f"candle {r['candle_time']} | close {r['price']:.2f} | "
           f"P(up) logreg {r['p_up_logreg']:.3f} | xgb {r['p_up_xgb']:.3f}")
 
