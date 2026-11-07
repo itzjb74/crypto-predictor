@@ -40,19 +40,25 @@ def add_closed_candle(candle):
     return True
 
 
-def show_prediction():
+def compute_prediction() -> dict:
     df = pd.DataFrame(list(buffer))
     df["time"] = pd.to_datetime(df["time"], unit="ms")
     lr = predict_latest(df, "logreg")
     xg = predict_latest(df, "xgb")
-    print(f"candle {lr['time']} | close {lr['price']:.2f} | "
-          f"P(up next) logreg {lr['p_up']:.3f} | xgb {xg['p_up']:.3f}")
+    next_start = pd.Timestamp(lr["time"]) + pd.Timedelta(milliseconds=INTERVAL_MS)
+    return {
+        "candle_time": lr["time"],                       # start of the last closed candle
+        "price": lr["price"],                            # its closing price
+        "predicts_hour_starting": next_start.isoformat(),
+        "p_up_logreg": lr["p_up"],
+        "p_up_xgb": xg["p_up"],
+    }
 
 
-async def main():
-    seed_buffer()
-    print(f"Buffer ready: {len(buffer)} closed candles. Waiting for the next close...")
-    show_prediction()
+async def run(on_prediction):
+    """Seed the buffer, report one prediction, then one more per closed candle."""
+    await asyncio.to_thread(seed_buffer)
+    on_prediction(compute_prediction())
 
     async for ws in websockets.connect(URL):   # reconnects automatically
         try:
@@ -65,11 +71,16 @@ async def main():
                     "low": float(k["l"]), "close": float(k["c"]), "volume": float(k["v"]),
                 }
                 if add_closed_candle(candle):
-                    show_prediction()
+                    on_prediction(compute_prediction())
         except websockets.ConnectionClosed:
             print("Connection lost, reconnecting...")
             continue
 
 
+def print_prediction(r):
+    print(f"candle {r['candle_time']} | close {r['price']:.2f} | "
+          f"P(up) logreg {r['p_up_logreg']:.3f} | xgb {r['p_up_xgb']:.3f}")
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(run(print_prediction))
