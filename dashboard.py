@@ -79,3 +79,47 @@ def chart_panel():
 
 
 chart_panel()
+
+@st.fragment(run_every=60)
+def history_panel():
+    try:
+        rows = requests.get(f"{API}/history", timeout=5).json()
+    except Exception as e:
+        st.error(f"Can't reach the API at {API}: {e}")
+        return
+
+    st.subheader("Prediction scoreboard")
+    if not isinstance(rows, list) or not rows:
+        st.info("No predictions logged yet. One is logged every hour.")
+        return
+
+    df = pd.DataFrame(rows)
+    done = df[df["went_up"].notna()]
+    n = len(done)
+
+    if n == 0:
+        st.info("Predictions are being logged. The first score arrives once the next candle closes.")
+    else:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Scored predictions", n)
+        c2.metric("Logistic Regression right", f"{done['logreg_correct'].astype(bool).mean():.1%}")
+        c3.metric("XGBoost right", f"{done['xgb_correct'].astype(bool).mean():.1%}")
+        st.caption(
+            f"With only {n} scored predictions, pure luck can land anywhere within "
+            f"about ±{98 / n ** 0.5:.0f} points of 50%."
+        )
+
+    recent = df.tail(24).iloc[::-1]
+    table = pd.DataFrame({
+        "Candle (UTC)": pd.to_datetime(recent["candle_time"]).dt.strftime("%b %d %H:%M"),
+        "Close": recent["price"],
+        "LogReg P(up)": recent["p_up_logreg"],
+        "XGB P(up)": recent["p_up_xgb"],
+        "Next hour": recent["went_up"].map({True: "up", False: "down"}).fillna("pending"),
+        "LogReg": recent["logreg_correct"].map({True: "right", False: "wrong"}).fillna("-"),
+        "XGB": recent["xgb_correct"].map({True: "right", False: "wrong"}).fillna("-"),
+    })
+    st.dataframe(table, hide_index=True)
+
+
+history_panel()

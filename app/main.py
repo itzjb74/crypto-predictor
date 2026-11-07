@@ -1,6 +1,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from app.log import append_prediction, load_scored
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 
@@ -22,6 +23,11 @@ def with_disclaimer(result: dict) -> dict:
 async def store_prediction(result: dict):
     """Called by the live feed for every new prediction."""
     state["latest"] = result
+    try:
+        append_prediction(result)
+    except Exception as e:                      # logging must never stop the live feed
+        print("Could not log prediction:", repr(e))
+
     for ws in list(clients):                    # copy: the set can change while we await
         try:
             await ws.send_json(with_disclaimer(result))
@@ -74,6 +80,10 @@ def candles(limit: int = 200):
         {**row, "time": datetime.fromtimestamp(row["time"] / 1000, tz=timezone.utc).isoformat()}
         for row in rows
     ]
+
+@app.get("/history")
+def history(limit: int = 1000):
+    return load_scored()[-max(1, min(limit, 1000)):]
 
 @app.websocket("/ws/predictions")
 async def ws_predictions(websocket: WebSocket):
