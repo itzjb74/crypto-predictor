@@ -25,37 +25,45 @@ and what rigorous evaluation looks like, not to build a money machine.
 
 ## Results (the honest part)
 
-**Data:** about 6 months of hourly candles (May 8 to Nov 4, 2026, 4,319 rows).
+**Data:** about 5 years of hourly BTC/USDT candles (Nov 2021 to Nov 2026, 43,798 rows).
 **Target:** does the next hour close up? About 50% of hours do.
+**Method:** walk-forward validation with 8 folds. Each fold trains on all earlier data and
+tests on the next 4,000 hours (about 5.5 months), covering March 2023 to November 2026.
+Success criteria were written down before the test was run.
 
-**Accuracy** (50% is a coin flip; each fold's margin of error is about ±4 points):
+An earlier test on only six months of data was inconclusive (both models near 51.5%);
+more data was the single biggest improvement.
 
-| Approach | Single 80/20 split | Walk-forward, 6 folds (average) |
+**Accuracy** (pooled over 32,000 test predictions; coin-flip margin of error is about ±0.55 points):
+
+| Approach | Accuracy | Folds above 50% |
 |---|---|---|
-| Always predict the majority class | 50.7% | 49.8% |
-| Opposite of last hour's direction | 51.4% | 52.7% |
-| Logistic Regression | 51.0% | 51.6% |
-| XGBoost | 51.0% | 51.5% |
+| Always predict the majority class | 50.5% | 5 of 8 |
+| Opposite of last hour's direction | 52.7% | 8 of 8 |
+| Logistic Regression | 52.6% | 8 of 8 |
+| XGBoost | 53.2% | 8 of 8 |
 
-The one-line "opposite of last hour" rule (a faint mean-reversion effect) beat 50% in
-all six periods, and neither model improved on it. XGBoost scored **67%** on the data
-it was trained on but about 51.5% on unseen data, which is a textbook case of
-memorizing noise.
+There is a small but real directional signal, mostly weak mean reversion after the
+previous hour's move. XGBoost beat the one-line rule narrowly.
 
-**Trading after fees** (assumed 0.1% per trade, walk-forward over Jun 7 to Nov 4):
+**Trading after fees** (assumed 0.1% per trade, no slippage; all 8 folds compounded):
 
-| Strategy | Total return |
-|---|---|
-| Cash (do nothing) | 0.0% |
-| Buy and hold | +29.7% (Bitcoin rose over the period) |
-| Logistic Regression, trade only if P(up) > 0.60 | -5.2% |
-| XGBoost, trade only if P(up) > 0.60 | -35.1% |
-| Logistic Regression, trade every hour | -46.6% |
-| Opposite of last hour, trade every hour | -83.7% |
+| Strategy | Profitable folds | Total return |
+|---|---|---|
+| Cash (do nothing) | n/a | 0.0% |
+| Buy and hold | 5 of 8 | +208.3% (Bitcoin rose over the period) |
+| Logistic Regression, trade if P(up) > 0.60 | 2 of 8 | -37.4% |
+| XGBoost, trade if P(up) > 0.60 | 0 of 8 | -95.1% |
+| Logistic Regression, trade if P(up) > 0.50 | 0 of 8 | -100.0% |
+| XGBoost, trade if P(up) > 0.50 | 0 of 8 | -100.0% |
 
-Every model-driven strategy lost to doing nothing. A hit rate of 52% sounds like an
-edge, but a typical hourly move is about 0.3% and each trade costs 0.1%, so the edge
-is several times smaller than the cost of acting on it.
+By the success criteria written in advance, the models have **no tradable edge**: the
+accuracy criteria passed, but no configuration beat cash after fees.
+
+**Why:** the signal is real but small. XGBoost at the 0.50 threshold would break even at a fee of
+roughly 0.01% per trade, against the 0.1% assumed. The edge per trade is concentrated in
+high-volatility hours (break-even fees of about 0.03% to 0.05% there), which is closer
+but still short of the fee, and trading costs are also higher when volatility is high.
 
 **Live paper-trading results:** _(fill in after the server has run for a couple of
 weeks: `python -m training.evaluate_live`)_
@@ -98,6 +106,7 @@ app/
 training/
   train.py          trains and saves both models
   evaluate_live.py  scores the live log, with a paper-traded return after fees
+  fetch_history.py  downloads several years of hourly candles
 dashboard.py        Streamlit dashboard
 01_get_data.ipynb ... 03_baselines.ipynb   exploration, baselines, walk-forward tests
 ```
@@ -109,7 +118,8 @@ python -m venv venv
 venv\Scripts\activate            # Windows
 pip install -r requirements.txt
 
-# 1. Download history: run the notebook 01_get_data.ipynb (writes data/btc_1h.csv)
+# 1. Download history: run the notebook 01_get_data.ipynb (writes data/btc_1h.csv),
+#    or python -m training.fetch_history --years 5 (writes data/btc_1h_long.csv)
 # 2. Train and save the models
 python -m training.train
 
